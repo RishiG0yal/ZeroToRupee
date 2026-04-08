@@ -4,8 +4,6 @@
 
 > Built for students who have an idea but don't know how to make money from it. ZeroToRupee gives real market data, competitor analysis, and a week-by-week action plan to your first rupee.
 
-🔗 **Live Demo**: [zerotorupee.vercel.app](https://zerotorupee.vercel.app)
-
 ---
 
 ## What It Does
