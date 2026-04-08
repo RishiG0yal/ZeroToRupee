@@ -27,7 +27,7 @@ export default function MessageBubble({ m }: { m: Message }) {
             ul: ({ children }) => <ul className="my-3 space-y-2">{children}</ul>,
             ol: ({ children }) => <ol className="my-3 space-y-2 list-decimal list-inside">{children}</ol>,
             li: ({ node, ...props }) => {
-              const isOrdered = node?.parent?.type === 'element' && (node.parent as any).tagName === 'ol';
+              const isOrdered = (node as any)?.parent?.tagName === 'ol';
               return isOrdered
                 ? <li className="text-gray-200" {...props} />
                 : <li className="flex gap-2.5 items-start"><span className="text-orange-400 flex-shrink-0 mt-0.5">▸</span><span>{(props as any).children}</span></li>;
