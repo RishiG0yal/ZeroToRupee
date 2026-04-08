@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
   for (const file of files) {
     const text = await file.text();
     // Truncate large files to avoid token overflow
-    const truncated = text.length > 8000 ? text.slice(0, 8000) + '\n\n[...truncated]' : text;
+    const truncated = text.length > 80000 ? text.slice(0, 80000) + '\n\n[...truncated]' : text;
     results.push({ name: file.name, content: truncated, type: file.type });
   }
 

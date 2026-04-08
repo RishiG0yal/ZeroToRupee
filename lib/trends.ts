@@ -2,7 +2,7 @@
 import googleTrends from 'google-trends-api';
 
 export interface TrendsData {
-  interest: number; // 0-100
+  interest: number;
   trend: 'rising' | 'falling' | 'stable';
   relatedQueries: string[];
   topCities: string[];
@@ -16,10 +16,9 @@ export async function getTrendsData(idea: string): Promise<TrendsData> {
     const [interestRes, relatedRes] = await Promise.allSettled([
       googleTrends.interestOverTime({
         keyword,
-        geo: 'IN',
         startTime: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
       }),
-      googleTrends.relatedQueries({ keyword, geo: 'IN' }),
+      googleTrends.relatedQueries({ keyword }),
     ]);
 
     let interest = 50;
@@ -64,13 +63,13 @@ export async function getTrendsData(idea: string): Promise<TrendsData> {
 }
 
 function extractKeyword(idea: string): string {
-  const stopWords = ['i', 'want', 'to', 'build', 'create', 'make', 'a', 'an', 'the', 'for', 'that', 'which', 'helps', 'app', 'website'];
-  const words = idea.toLowerCase().split(' ').filter(w => !stopWords.includes(w) && w.length > 2);
-  return words.slice(0, 3).join(' ') || idea.slice(0, 30);
+  const stopWords = new Set(['i', 'want', 'to', 'build', 'create', 'make', 'a', 'an', 'the', 'for', 'that', 'which', 'helps', 'app', 'website', 'how', 'about', 'will', 'can', 'my', 'me', 'we', 'our', 'it', 'is', 'are', 'be', 'do', 'this', 'with', 'and', 'or', 'but', 'if', 'on', 'in', 'at', 'by', 'of', 'from']);
+  const words = idea.toLowerCase().split(/\s+/).filter(w => !stopWords.has(w) && w.length > 2);
+  return words.slice(0, 4).join(' ') || idea.slice(0, 40);
 }
 
 function buildTrendSummary(keyword: string, interest: number, trend: string, related: string[]): string {
   const trendEmoji = trend === 'rising' ? '📈' : trend === 'falling' ? '📉' : '➡️';
   const interestLabel = interest > 70 ? 'HIGH' : interest > 40 ? 'MODERATE' : 'LOW';
-  return `${trendEmoji} "${keyword}" in India: ${interestLabel} interest (${interest}/100), trend is ${trend}. ${related.length > 0 ? `Related searches: ${related.slice(0, 3).join(', ')}` : ''}`;
+  return `${trendEmoji} "${keyword}" globally: ${interestLabel} interest (${interest}/100), trend is ${trend}. ${related.length > 0 ? `Related searches: ${related.slice(0, 3).join(', ')}` : ''}`;
 }

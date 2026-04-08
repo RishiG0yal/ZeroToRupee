@@ -1,36 +1,61 @@
 'use client';
 import { useState, useRef, useEffect, useCallback } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import MessageBubble from '@/components/MessageBubble';
 import RevenueCalculator from '@/components/RevenueCalculator';
 import MarketChart from '@/components/MarketChart';
 
 interface Message { role: 'user' | 'assistant'; content: string; }
 type Panel = 'research' | 'trends' | 'roadmap' | 'validate' | 'pitch' | 'canvas' | 'calculator' | 'chart' | null;
 
-export default function Home() {
+const STAGES = ['Discover', 'Validate', 'Build', 'Monetize', 'First ₹'];
+
+const STARTERS = [
+  { icon: '💡', text: 'I have an idea but don\'t know how to make money from it' },
+  { icon: '💻', text: 'I know how to code — what can I build to earn?' },
+  { icon: '🎨', text: 'I can design — how do I get my first client?' },
+  { icon: '📚', text: 'I want to sell my college notes or study material' },
+];
+
+const TOOLS = [
+  { id: 'research', icon: '🔍', label: 'Competitors' },
+  { id: 'trends', icon: '📈', label: 'Trends' },
+  { id: 'chart', icon: '📊', label: 'Market Chart' },
+  { id: 'validate', icon: '✅', label: 'Validate' },
+  { id: 'roadmap', icon: '🗺️', label: 'Roadmap' },
+  { id: 'pitch', icon: '📣', label: 'Pitch Kit' },
+  { id: 'canvas', icon: '🎨', label: 'Canvas' },
+  { id: 'calculator', icon: '💰', label: 'Revenue' },
+] as const;
+
+export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>(() => {
     if (typeof window === 'undefined') return [];
     try { return JSON.parse(localStorage.getItem('ztr_messages') || '[]'); } catch { return []; }
   });
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [idea, setIdea] = useState(() => {
-    if (typeof window === 'undefined') return '';
-    return localStorage.getItem('ztr_idea') || '';
-  });
+  const [idea, setIdea] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('ztr_idea') || '' : '');
+  const [stage, setStage] = useState(0);
   const [marketContext, setMarketContext] = useState('');
   const [activePanel, setActivePanel] = useState<Panel>(null);
   const [panelData, setPanelData] = useState<Record<string, any>>({});
   const [toolLoading, setToolLoading] = useState(false);
-  const [uploadedFiles, setUploadedFiles] = useState<{ name: string; content: string }[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<{ name: string }[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
-  useEffect(() => { if (messages.length) localStorage.setItem('ztr_messages', JSON.stringify(messages.slice(-50))); }, [messages]);
+  useEffect(() => { if (messages.length) localStorage.setItem('ztr_messages', JSON.stringify(messages.slice(-60))); }, [messages]);
   useEffect(() => { if (idea) localStorage.setItem('ztr_idea', idea); }, [idea]);
+
+  useEffect(() => {
+    const count = messages.filter(m => m.role === 'user').length;
+    if (count >= 8) setStage(4);
+    else if (count >= 6) setStage(3);
+    else if (count >= 4) setStage(2);
+    else if (count >= 2) setStage(1);
+  }, [messages]);
 
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim()) return;
@@ -38,20 +63,14 @@ export default function Home() {
     if (isFirstIdea) {
       const newIdea = text.slice(0, 200);
       setIdea(newIdea);
-      // Auto-run market analysis in background
       setTimeout(() => {
         fetch('/api/research', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idea: newIdea }) })
-          .then(r => r.json()).then(data => {
-            setPanelData(prev => ({ ...prev, research: data }));
-            setMarketContext(prev => prev + '\nCompetitor data: ' + data.summary);
-          });
+          .then(r => r.json()).then(data => { setPanelData(prev => ({ ...prev, research: data })); setMarketContext(prev => prev + '\nCompetitor data: ' + data.summary); });
         fetch('/api/trends', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idea: newIdea }) })
-          .then(r => r.json()).then(data => {
-            setPanelData(prev => ({ ...prev, trends: data }));
-            setMarketContext(prev => prev + '\nTrends data: ' + data.summary);
-          });
+          .then(r => r.json()).then(data => { setPanelData(prev => ({ ...prev, trends: data })); setMarketContext(prev => prev + '\nTrends: ' + data.summary); });
       }, 500);
     }
+
     const newMessages: Message[] = [...messages, { role: 'user', content: text }];
     setMessages(newMessages);
     setInput('');
@@ -59,31 +78,25 @@ export default function Home() {
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
     try {
-      const context = [
-        marketContext,
-        uploadedFiles.length > 0 ? `## Uploaded Files\n${uploadedFiles.map(f => `### ${f.name}\n\`\`\`\n${f.content}\n\`\`\``).join('\n\n')}` : ''
-      ].filter(Boolean).join('\n\n');
-
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: newMessages, context }),
+        body: JSON.stringify({ messages: newMessages, context: marketContext }),
       });
-
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
-      let assistantMsg = '';
+      let msg = '';
       setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        assistantMsg += decoder.decode(value);
-        setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: assistantMsg }; return u; });
+        msg += decoder.decode(value);
+        setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: msg }; return u; });
       }
     } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: '⚠️ Connection error. Please try again.' }]);
     } finally { setLoading(false); }
-  }, [messages, marketContext, idea, uploadedFiles]);
+  }, [messages, marketContext, idea]);
 
   const handleUpload = async (files: FileList) => {
     const formData = new FormData();
@@ -91,28 +104,22 @@ export default function Home() {
     const res = await fetch('/api/upload', { method: 'POST', body: formData });
     const data = await res.json();
     setUploadedFiles(prev => [...prev, ...data.files]);
-
-    // Build file content inline so it's available immediately (don't rely on state update)
-    const fileContext = data.files.map((f: { name: string; content: string }) =>
-      `### ${f.name}\n\`\`\`\n${f.content}\n\`\`\``
-    ).join('\n\n');
-
-    const userMsg = `I've uploaded the following file(s): ${data.files.map((f: { name: string }) => f.name).join(', ')}\n\nHere is the content:\n\n${fileContext}\n\nAnalyze this, tell me what it does, what's missing, and exactly how I can monetize it as an Indian student.`;
-    sendMessage(userMsg);
+    const fileContext = data.files.map((f: { name: string; content: string }) => `### ${f.name}\n\`\`\`\n${f.content}\n\`\`\``).join('\n\n');
+    sendMessage(`I've uploaded: ${data.files.map((f: { name: string }) => f.name).join(', ')}\n\n${fileContext}\n\nAnalyze this, tell me what it does, what's missing, and how I can monetize it.`);
   };
 
   const runTool = async (tool: NonNullable<Panel>) => {
-    if (tool === 'calculator') { setActivePanel('calculator'); return; }
-    if (tool === 'chart') { setActivePanel('chart'); return; }
+    if (tool === 'calculator' || tool === 'chart') { setActivePanel(tool); return; }
     if (!idea && tool !== 'canvas') return;
     setActivePanel(tool);
     setToolLoading(true);
     try {
-      const body = JSON.stringify({ idea, trendsData: panelData.trends, competitorData: panelData.research });
-      const endpoints: Record<string, string> = {
-        research: '/api/research', trends: '/api/trends', roadmap: '/api/roadmap',
-        validate: '/api/validate', pitch: '/api/pitch', canvas: '/api/canvas',
-      };
+      // Extract full context from conversation, not just first idea
+      const conversationSummary = messages
+        .map(m => `${m.role === 'user' ? 'Student' : 'Coach'}: ${m.content}`)
+        .join('\n');
+      const body = JSON.stringify({ idea, conversationSummary, trendsData: panelData.trends, competitorData: panelData.research });
+      const endpoints: Record<string, string> = { research: '/api/research', trends: '/api/trends', roadmap: '/api/roadmap', validate: '/api/validate', pitch: '/api/pitch', canvas: '/api/canvas' };
       const res = await fetch(endpoints[tool], { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
       const data = await res.json();
       setPanelData(prev => ({ ...prev, [tool]: data }));
@@ -121,198 +128,178 @@ export default function Home() {
     } finally { setToolLoading(false); }
   };
 
-  const tools = [
-    { id: 'research', icon: '🔍', label: 'Competitors' },
-    { id: 'trends', icon: '📈', label: 'Trends' },
-    { id: 'chart', icon: '📊', label: 'Market Chart' },
-    { id: 'validate', icon: '✅', label: 'Validate Idea' },
-    { id: 'roadmap', icon: '🗺️', label: 'Roadmap' },
-    { id: 'pitch', icon: '📣', label: 'Pitch Kit' },
-    { id: 'canvas', icon: '🎨', label: 'Business Canvas' },
-    { id: 'calculator', icon: '💰', label: 'Revenue Calc' },
-  ] as const;
-
-  const starters = [
-    "I want to sell notes to college students",
-    "I can design logos and posters",
-    "I want to build a fitness app",
-    "I know how to code in Python",
-  ];
+  const newChat = () => {
+    if (!confirm('Start a new chat?')) return;
+    setMessages([]); setIdea(''); setMarketContext(''); setPanelData({});
+    setUploadedFiles([]); setActivePanel(null); setStage(0);
+    localStorage.removeItem('ztr_messages'); localStorage.removeItem('ztr_idea');
+  };
 
   return (
-    <div className="flex h-screen bg-[#0d0d14] text-white overflow-hidden">
+    <div className="flex h-screen bg-[#0a0a0f] text-white overflow-hidden">
       {/* Sidebar */}
-      <div className="w-52 flex-shrink-0 border-r border-white/8 flex flex-col bg-[#0a0a10]">
-        <div className="p-4 border-b border-white/8">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center font-black text-sm">₹</div>
-              <div>
-                <div className="text-sm font-bold">ZeroToRupee</div>
-                <div className="text-[10px] text-gray-500">Idea → Income</div>
-              </div>
+      <aside className="w-56 flex-shrink-0 flex flex-col border-r border-white/6 bg-[#0d0d16]">
+        {/* Logo */}
+        <div className="p-4 flex items-center justify-between border-b border-white/6">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center font-black text-sm shadow-lg shadow-orange-500/30">₹</div>
+            <div>
+              <div className="text-sm font-bold tracking-tight">ZeroToRupee</div>
+              <div className="text-[10px] text-gray-600">Idea → Income</div>
             </div>
-            <button
-              onClick={() => {
-                if (!confirm('Start a new chat? Current conversation will be cleared.')) return;
-                setMessages([]); setIdea(''); setMarketContext(''); setPanelData({});
-                setUploadedFiles([]); setActivePanel(null);
-                localStorage.removeItem('ztr_messages'); localStorage.removeItem('ztr_idea');
-              }}
-              title="New Chat"
-              className="text-gray-600 hover:text-white transition-colors text-sm"
-            >✏️</button>
+          </div>
+          <button onClick={newChat} title="New Chat" className="text-gray-700 hover:text-gray-300 transition-colors text-base">✏️</button>
+        </div>
+
+        {/* Stage tracker */}
+        <div className="px-4 py-3 border-b border-white/6">
+          <p className="text-[10px] text-gray-600 uppercase tracking-wider mb-2">Your Journey</p>
+          <div className="space-y-1">
+            {STAGES.map((s, i) => (
+              <div key={s} className={`flex items-center gap-2 text-xs py-0.5 ${i === stage ? 'text-orange-400 font-semibold' : i < stage ? 'text-gray-500 line-through' : 'text-gray-700'}`}>
+                <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${i === stage ? 'bg-orange-400' : i < stage ? 'bg-gray-600' : 'bg-gray-800'}`} />
+                {s}
+              </div>
+            ))}
           </div>
         </div>
 
-        <div className="p-3 flex flex-col gap-1 flex-1">
+        {/* Tools */}
+        <div className="p-3 flex-1 overflow-y-auto">
           <p className="text-[10px] text-gray-600 uppercase tracking-wider mb-2 px-1">Tools</p>
-          {tools.map(t => (
-            <button key={t.id} onClick={() => runTool(t.id)}
-              disabled={!idea && t.id !== 'calculator' && t.id !== 'chart'}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all disabled:opacity-25 text-left ${
-                activePanel === t.id ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30' : 'text-gray-400 hover:bg-white/5 hover:text-white'
-              }`}>
-              <span>{t.icon}</span>{t.label}
-            </button>
-          ))}
+          <div className="space-y-0.5">
+            {TOOLS.map(t => (
+              <button key={t.id} onClick={() => runTool(t.id)}
+                disabled={!idea && t.id !== 'calculator' && t.id !== 'chart'}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition-all disabled:opacity-20 text-left ${activePanel === t.id ? 'bg-orange-500/15 text-orange-300 border border-orange-500/25' : 'text-gray-500 hover:bg-white/5 hover:text-gray-200'}`}>
+                <span className="text-sm">{t.icon}</span>{t.label}
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="p-3 border-t border-white/8">
-          <input ref={fileInputRef} type="file" multiple accept=".txt,.md,.js,.ts,.py,.jsx,.tsx,.json,.csv" className="hidden"
-            onChange={e => e.target.files && handleUpload(e.target.files)} />
+        {/* Upload */}
+        <div className="p-3 border-t border-white/6">
+          <input ref={fileInputRef} type="file" multiple accept=".txt,.md,.js,.ts,.py,.jsx,.tsx,.json,.csv" className="hidden" onChange={e => e.target.files && handleUpload(e.target.files)} />
           <button onClick={() => fileInputRef.current?.click()}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-gray-400 hover:bg-white/5 hover:text-white transition-all border border-white/8 border-dashed">
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-all border border-dashed border-white/8">
             <span>📎</span> Upload code / files
           </button>
           {uploadedFiles.map((f, i) => (
-            <div key={i} className="mt-1 flex items-center gap-1 text-[10px] text-green-400 bg-green-500/10 px-2 py-1 rounded truncate">
-              ✓ {f.name}
-            </div>
+            <div key={i} className="mt-1 text-[10px] text-green-500 bg-green-500/8 px-2 py-1 rounded truncate">✓ {f.name}</div>
           ))}
         </div>
-      </div>
+      </aside>
 
-      {/* Main */}
+      {/* Main area */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Chat */}
-        <div className="flex flex-col flex-1 overflow-hidden">
-          <div className="flex-1 overflow-y-auto scrollbar-hide px-6 py-4 space-y-4">
-            {messages.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full space-y-6">
-                <div className="text-center">
-                  <div className="text-4xl font-black bg-gradient-to-r from-orange-400 to-red-500 bg-clip-text text-transparent mb-2">Zero → ₹</div>
-                  <p className="text-gray-400 text-sm">Tell me your idea. I'll tell you exactly how to make money from it.</p>
-                </div>
-                <div className="grid grid-cols-2 gap-2 w-full max-w-md">
-                  {starters.map((s, i) => (
-                    <button key={i} onClick={() => sendMessage(s)}
-                      className="text-left text-xs bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl px-3 py-2.5 text-gray-300 transition-all hover:border-orange-500/30">
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : messages.map((m, i) => (
-              <div key={i} className={`fade-in flex gap-3 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                {m.role === 'assistant' && (
-                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center text-xs font-black flex-shrink-0 mt-0.5">₹</div>
-                )}
-                <div className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                  m.role === 'user'
-                    ? 'bg-orange-500/15 border border-orange-500/25 text-white rounded-tr-sm'
-                    : 'bg-white/5 border border-white/10 text-gray-100 rounded-tl-sm prose prose-invert prose-sm max-w-none'
-                }`}>
-                  {m.role === 'assistant' ? (
-                    <>
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}
-                        components={{
-                          p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                          strong: ({ children }) => <strong className="text-orange-300 font-semibold">{children}</strong>,
-                          ul: ({ children }) => <ul className="my-2 space-y-1">{children}</ul>,
-                          ol: ({ children }) => <ol className="my-2 space-y-1 list-decimal list-inside">{children}</ol>,
-                          li: ({ node, ...props }) => {
-                            const isOrdered = node?.parent?.type === 'element' && (node.parent as any).tagName === 'ol';
-                            return isOrdered
-                              ? <li className="text-gray-100 list-item" {...props} />
-                              : <li className="flex gap-2" {...props}><span className="text-orange-400 flex-shrink-0">•</span><span>{(props as any).children}</span></li>;
-                          },
-                          code: ({ children }) => <code className="bg-white/10 px-1.5 py-0.5 rounded text-orange-200 text-xs font-mono">{children}</code>,
-                          h1: ({ children }) => <h1 className="text-base font-bold text-white mb-2">{children}</h1>,
-                          h2: ({ children }) => <h2 className="text-sm font-bold text-white mb-1">{children}</h2>,
-                          h3: ({ children }) => <h3 className="text-sm font-semibold text-orange-300 mb-1">{children}</h3>,
-                          blockquote: ({ children }) => <blockquote className="border-l-2 border-orange-500 pl-3 text-gray-300 italic">{children}</blockquote>,
-                        }}>
-                        {m.content}
-                      </ReactMarkdown>
-                      <CopyButton text={m.content} />
-                    </>
-                  ) : m.content}
-                </div>
-                {m.role === 'user' && (
-                  <div className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-xs flex-shrink-0 mt-0.5">👤</div>
-                )}
-              </div>
-            ))}
-            {loading && (
-              <div className="fade-in flex gap-3">
-                <div className="w-7 h-7 rounded-full bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center text-xs font-black flex-shrink-0">₹</div>
-                <div className="bg-white/5 border border-white/10 rounded-2xl rounded-tl-sm px-4 py-3 flex gap-1.5 items-center">
-                  <div className="pulse-dot w-1.5 h-1.5 rounded-full bg-orange-400" />
-                  <div className="pulse-dot w-1.5 h-1.5 rounded-full bg-orange-400" />
-                  <div className="pulse-dot w-1.5 h-1.5 rounded-full bg-orange-400" />
-                </div>
-              </div>
-            )}
-            <div ref={bottomRef} />
-          </div>
-
-          {/* Input */}
-          <div className="px-6 pb-4 pt-2 border-t border-white/8">
-            {idea && !marketContext && (
-              <div className="mb-2 px-3 py-1.5 bg-orange-500/8 border border-orange-500/15 rounded-lg text-[11px] text-orange-400 flex items-center gap-2">
-                <div className="pulse-dot w-1.5 h-1.5 rounded-full bg-orange-400 flex-shrink-0" />
-                Analyzing market in background...
-              </div>
-            )}
-            {marketContext && (
-              <div className="mb-2 px-3 py-1.5 bg-green-500/8 border border-green-500/15 rounded-lg text-[11px] text-green-400">
-                📊 Market data loaded — responses are now data-backed
-              </div>
-            )}
-            <div className="flex gap-2 items-end bg-white/5 border border-white/10 rounded-2xl px-4 py-2.5 focus-within:border-orange-500/40 transition-colors">
-              <textarea ref={textareaRef} value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); } }}
-                onInput={e => { const t = e.target as HTMLTextAreaElement; t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 120) + 'px'; }}
-                placeholder="What's your idea? Even a rough thought works..."
-                rows={1} className="flex-1 bg-transparent text-sm text-white placeholder-gray-600 resize-none outline-none max-h-28" />
-              <button onClick={() => sendMessage(input)} disabled={loading || !input.trim()}
-                className="bg-gradient-to-r from-orange-500 to-red-600 text-white px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-30 hover:opacity-90 transition-opacity flex-shrink-0">
-                →
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Tool Panel */}
+        <ChatArea
+          messages={messages} loading={loading} idea={idea} marketContext={marketContext}
+          input={input} setInput={setInput} sendMessage={sendMessage}
+          textareaRef={textareaRef} bottomRef={bottomRef}
+        />
         {activePanel && (
-          <div className="w-80 flex-shrink-0 border-l border-white/8 flex flex-col bg-[#0a0a10] overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-white/8">
-              <span className="text-xs font-semibold text-white">
-                {tools.find(t => t.id === activePanel)?.icon} {tools.find(t => t.id === activePanel)?.label}
-              </span>
-              <button onClick={() => setActivePanel(null)} className="text-gray-600 hover:text-white text-xs">✕</button>
+          <ToolPanel panel={activePanel} data={panelData[activePanel]} allData={panelData}
+            loading={toolLoading} onClose={() => setActivePanel(null)} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ChatArea({ messages, loading, idea, marketContext, input, setInput, sendMessage, textareaRef, bottomRef }: any) {
+  return (
+    <div className="flex flex-col flex-1 overflow-hidden">
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto scrollbar-hide px-6 py-6 space-y-5">
+        {messages.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full space-y-8 max-w-lg mx-auto text-center">
+            <div>
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center font-black text-2xl mx-auto mb-4 shadow-2xl shadow-orange-500/30">₹</div>
+              <h2 className="text-2xl font-black text-white mb-2">What's your idea?</h2>
+              <p className="text-gray-500 text-sm">Tell me anything — rough thought, skill you have, problem you noticed. I'll help you make money from it.</p>
             </div>
-            <div className="flex-1 overflow-y-auto scrollbar-hide p-4">
-              {toolLoading ? (
-                <div className="text-center py-12 text-gray-600 text-xs">Analyzing your idea...</div>
-              ) : (
-                <PanelContent panel={activePanel} data={panelData[activePanel]} allData={panelData} />
-              )}
+            <div className="grid grid-cols-1 gap-2 w-full">
+              {STARTERS.map((s, i) => (
+                <button key={i} onClick={() => sendMessage(s.text)}
+                  className="flex items-center gap-3 text-left bg-white/3 hover:bg-white/6 border border-white/8 hover:border-orange-500/25 rounded-xl px-4 py-3 text-sm text-gray-300 transition-all group">
+                  <span className="text-lg flex-shrink-0">{s.icon}</span>
+                  <span className="group-hover:text-white transition-colors">{s.text}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          messages.map((m: Message, i: number) => <MessageBubble key={i} m={m} />)
+        )}
+
+        {loading && (
+          <div className="flex gap-3">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center font-black text-sm flex-shrink-0 shadow-lg shadow-orange-500/20">₹</div>
+            <div className="bg-[#13131f] border border-white/8 rounded-2xl rounded-tl-sm px-5 py-4 flex gap-1.5 items-center">
+              <div className="pulse-dot w-1.5 h-1.5 rounded-full bg-orange-400" />
+              <div className="pulse-dot w-1.5 h-1.5 rounded-full bg-orange-400" />
+              <div className="pulse-dot w-1.5 h-1.5 rounded-full bg-orange-400" />
             </div>
           </div>
         )}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Input area */}
+      <div className="px-6 pb-5 pt-3 border-t border-white/6">
+        {idea && !marketContext && (
+          <div className="mb-2 flex items-center gap-2 text-[11px] text-orange-400/70">
+            <div className="pulse-dot w-1.5 h-1.5 rounded-full bg-orange-400 flex-shrink-0" />
+            Analyzing global market...
+          </div>
+        )}
+        {marketContext && (
+          <div className="mb-2 text-[11px] text-green-500/70 flex items-center gap-1.5">
+            <span>●</span> Market data loaded — responses are data-backed
+          </div>
+        )}
+        <div className="relative bg-[#13131f] border border-white/10 rounded-2xl focus-within:border-orange-500/40 transition-colors shadow-xl">
+          <textarea ref={textareaRef} value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); } }}
+            onInput={e => { const t = e.target as HTMLTextAreaElement; t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 140) + 'px'; }}
+            placeholder="Describe your idea, ask anything, or share what you've built..."
+            rows={1}
+            className="w-full bg-transparent text-sm text-white placeholder-gray-600 resize-none outline-none px-5 pt-4 pb-12 max-h-36"
+          />
+          <div className="absolute bottom-3 right-3 flex items-center gap-2">
+            <span className="text-[10px] text-gray-700">Enter to send</span>
+            <button onClick={() => sendMessage(input)} disabled={loading || !input.trim()}
+              className="bg-gradient-to-r from-orange-500 to-red-600 text-white w-8 h-8 rounded-xl flex items-center justify-center disabled:opacity-30 hover:opacity-90 transition-opacity shadow-lg shadow-orange-500/20 font-bold text-sm">
+              →
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ToolPanel({ panel, data, allData, loading, onClose }: { panel: NonNullable<Panel>; data: any; allData: Record<string, any>; loading: boolean; onClose: () => void }) {
+  const tool = TOOLS.find(t => t.id === panel);
+  return (
+    <div className="w-80 flex-shrink-0 border-l border-white/6 flex flex-col bg-[#0d0d16] overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-white/6">
+        <span className="text-xs font-semibold text-white">{tool?.icon} {tool?.label}</span>
+        <button onClick={onClose} className="text-gray-700 hover:text-white transition-colors text-xs w-6 h-6 flex items-center justify-center rounded-lg hover:bg-white/8">✕</button>
+      </div>
+      <div className="flex-1 overflow-y-auto scrollbar-hide p-4">
+        {loading ? (
+          <div className="flex flex-col items-center justify-center h-32 gap-3">
+            <div className="flex gap-1.5">
+              <div className="pulse-dot w-2 h-2 rounded-full bg-orange-400" />
+              <div className="pulse-dot w-2 h-2 rounded-full bg-orange-400" />
+              <div className="pulse-dot w-2 h-2 rounded-full bg-orange-400" />
+            </div>
+            <p className="text-xs text-gray-600">Analyzing...</p>
+          </div>
+        ) : <PanelContent panel={panel} data={data} allData={allData} />}
       </div>
     </div>
   );
@@ -320,31 +307,27 @@ export default function Home() {
 
 function PanelContent({ panel, data, allData }: { panel: NonNullable<Panel>; data: any; allData: Record<string, any> }) {
   const [copied, setCopied] = useState('');
-  if (!data) return <p className="text-xs text-gray-600 text-center py-8">No data yet</p>;
-
-  const copy = (text: string, key: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(key);
-    setTimeout(() => setCopied(''), 2000);
-  };
+  const copy = (text: string, key: string) => { navigator.clipboard.writeText(text); setCopied(key); setTimeout(() => setCopied(''), 2000); };
 
   if (panel === 'calculator') return <RevenueCalculator />;
   if (panel === 'chart') return <MarketChart trendsData={allData.trends} researchData={allData.research} />;
+  if (!data) return <p className="text-xs text-gray-700 text-center py-8">No data yet — run this tool first</p>;
+
   if (panel === 'validate') return (
     <div className="space-y-3">
-      <div className="bg-white/5 border border-white/10 rounded-xl p-4 text-center">
-        <div className={`text-4xl font-black mb-1 ${data.score >= 7 ? 'text-green-400' : data.score >= 5 ? 'text-yellow-400' : 'text-red-400'}`}>{data.score}/10</div>
+      <div className="bg-gradient-to-br from-[#13131f] to-[#1a1a2e] border border-white/8 rounded-xl p-5 text-center">
+        <div className={`text-5xl font-black mb-1 ${data.score >= 7 ? 'text-green-400' : data.score >= 5 ? 'text-yellow-400' : 'text-red-400'}`}>{data.score}<span className="text-2xl text-gray-600">/10</span></div>
         <div className="text-sm font-semibold text-white">{data.verdict}</div>
       </div>
-      <Section title="✅ Strengths" items={data.strengths} color="green" />
-      <Section title="⚠️ Weaknesses" items={data.weaknesses} color="yellow" />
-      <div className="bg-red-500/8 border border-red-500/15 rounded-lg p-3">
+      <Card title="✅ Strengths" items={data.strengths} color="green" />
+      <Card title="⚠️ Weaknesses" items={data.weaknesses} color="yellow" />
+      <div className="bg-red-500/8 border border-red-500/15 rounded-xl p-3">
         <p className="text-[11px] font-semibold text-red-400 mb-1">🚨 Biggest Risk</p>
-        <p className="text-[11px] text-gray-300">{data.biggestRisk}</p>
+        <p className="text-[11px] text-gray-300 leading-relaxed">{data.biggestRisk}</p>
       </div>
-      <div className="bg-orange-500/8 border border-orange-500/15 rounded-lg p-3">
+      <div className="bg-orange-500/8 border border-orange-500/15 rounded-xl p-3">
         <p className="text-[11px] font-semibold text-orange-400 mb-1">💡 Recommendation</p>
-        <p className="text-[11px] text-gray-300">{data.recommendation}</p>
+        <p className="text-[11px] text-gray-300 leading-relaxed">{data.recommendation}</p>
       </div>
     </div>
   );
@@ -358,12 +341,10 @@ function PanelContent({ panel, data, allData }: { panel: NonNullable<Panel>; dat
         { key: 'instagramCaption', label: '📱 Instagram Caption', value: data.instagramCaption },
         { key: 'elevatorPitch', label: '🎤 Elevator Pitch', value: data.elevatorPitch },
       ].map(({ key, label, value }) => (
-        <div key={key} className="bg-white/4 border border-white/8 rounded-lg p-3">
+        <div key={key} className="bg-white/3 border border-white/8 rounded-xl p-3">
           <div className="flex justify-between items-center mb-1.5">
             <p className="text-[11px] font-semibold text-orange-300">{label}</p>
-            <button onClick={() => copy(value, key)} className="text-[10px] text-gray-500 hover:text-white transition-colors">
-              {copied === key ? '✓ Copied' : 'Copy'}
-            </button>
+            <button onClick={() => copy(value, key)} className="text-[10px] text-gray-600 hover:text-white transition-colors">{copied === key ? '✓' : 'Copy'}</button>
           </div>
           <p className="text-[11px] text-gray-300 leading-relaxed">{value}</p>
         </div>
@@ -374,21 +355,15 @@ function PanelContent({ panel, data, allData }: { panel: NonNullable<Panel>; dat
   if (panel === 'canvas') return (
     <div className="space-y-2">
       {[
-        { key: 'problem', label: '❗ Problem', color: 'red' },
-        { key: 'customerSegments', label: '👥 Customers', color: 'blue' },
-        { key: 'uniqueValue', label: '⭐ Unique Value', color: 'yellow' },
-        { key: 'solution', label: '💡 Solution', color: 'green' },
-        { key: 'channels', label: '📢 Channels', color: 'purple' },
-        { key: 'revenueStreams', label: '💰 Revenue', color: 'green' },
-        { key: 'costStructure', label: '💸 Costs', color: 'orange' },
-        { key: 'keyMetrics', label: '📊 Metrics', color: 'pink' },
-        { key: 'unfairAdvantage', label: '🛡️ Unfair Advantage', color: 'purple' },
+        { key: 'problem', label: '❗ Problem' }, { key: 'customerSegments', label: '👥 Customers' },
+        { key: 'uniqueValue', label: '⭐ Unique Value' }, { key: 'solution', label: '💡 Solution' },
+        { key: 'channels', label: '📢 Channels' }, { key: 'revenueStreams', label: '💰 Revenue' },
+        { key: 'costStructure', label: '💸 Costs' }, { key: 'keyMetrics', label: '📊 Metrics' },
+        { key: 'unfairAdvantage', label: '🛡️ Unfair Advantage' },
       ].map(({ key, label }) => (
-        <div key={key} className="bg-white/4 border border-white/8 rounded-lg p-3">
-          <p className="text-[11px] font-semibold text-orange-300 mb-1">{label}</p>
-          {Array.isArray(data[key])
-            ? data[key].map((item: string, i: number) => <p key={i} className="text-[11px] text-gray-300">• {item}</p>)
-            : <p className="text-[11px] text-gray-300">{data[key]}</p>}
+        <div key={key} className="bg-white/3 border border-white/8 rounded-xl p-3">
+          <p className="text-[11px] font-semibold text-orange-300 mb-1.5">{label}</p>
+          {Array.isArray(data[key]) ? data[key].map((item: string, i: number) => <p key={i} className="text-[11px] text-gray-300 mb-0.5">• {item}</p>) : <p className="text-[11px] text-gray-300">{data[key]}</p>}
         </div>
       ))}
     </div>
@@ -396,89 +371,52 @@ function PanelContent({ panel, data, allData }: { panel: NonNullable<Panel>; dat
 
   if (panel === 'research') return (
     <div className="space-y-3">
-      <p className="text-[11px] text-gray-400">{data.summary}</p>
+      <p className="text-[11px] text-gray-500 leading-relaxed">{data.summary}</p>
       {data.competitors?.map((c: any, i: number) => (
-        <div key={i} className="bg-white/4 border border-white/8 rounded-lg p-3">
-          <div className="flex justify-between mb-1">
-            <span className="text-xs font-medium text-white truncate">{c.name}</span>
-            <span className="text-[10px] text-orange-400 ml-1">{c.source}</span>
-          </div>
+        <div key={i} className="bg-white/3 border border-white/8 rounded-xl p-3">
+          <div className="flex justify-between mb-1"><span className="text-xs font-medium text-white truncate">{c.name}</span><span className="text-[10px] text-orange-400 ml-1 flex-shrink-0">{c.source}</span></div>
           <p className="text-[11px] text-gray-500 line-clamp-2">{c.description}</p>
         </div>
       ))}
-      {data.gaps?.length > 0 && <Section title="🎯 Gaps to exploit" items={data.gaps} color="green" />}
+      {data.gaps?.length > 0 && <Card title="🎯 Gaps to exploit" items={data.gaps} color="green" />}
     </div>
   );
 
   if (panel === 'trends') return (
     <div className="space-y-3">
-      <p className="text-[11px] text-gray-400">{data.summary}</p>
-      <div className="bg-white/4 border border-white/8 rounded-lg p-3">
+      <p className="text-[11px] text-gray-500">{data.summary}</p>
+      <div className="bg-white/3 border border-white/8 rounded-xl p-3">
         <div className="flex justify-between items-center mb-2">
-          <span className="text-[11px] text-gray-400">India Interest</span>
+          <span className="text-[11px] text-gray-400">Global Interest</span>
           <span className={`text-xs font-bold ${data.trend === 'rising' ? 'text-green-400' : data.trend === 'falling' ? 'text-red-400' : 'text-yellow-400'}`}>
             {data.trend === 'rising' ? '📈 Rising' : data.trend === 'falling' ? '📉 Falling' : '➡️ Stable'}
           </span>
         </div>
-        <div className="w-full bg-white/10 rounded-full h-1.5">
-          <div className="bg-gradient-to-r from-orange-500 to-red-500 h-1.5 rounded-full" style={{ width: `${data.interest}%` }} />
-        </div>
-        <p className="text-[10px] text-gray-600 mt-1">{data.interest}/100</p>
+        <div className="w-full bg-white/8 rounded-full h-1.5"><div className="bg-gradient-to-r from-orange-500 to-red-500 h-1.5 rounded-full" style={{ width: `${data.interest}%` }} /></div>
+        <p className="text-[10px] text-gray-700 mt-1">{data.interest}/100</p>
       </div>
       {data.relatedQueries?.length > 0 && (
-        <div className="bg-white/4 border border-white/8 rounded-lg p-3">
+        <div className="bg-white/3 border border-white/8 rounded-xl p-3">
           <p className="text-[11px] font-semibold text-white mb-2">Related searches</p>
-          <div className="flex flex-wrap gap-1">
-            {data.relatedQueries.map((q: string, i: number) => (
-              <span key={i} className="bg-white/8 text-[10px] text-gray-300 px-2 py-0.5 rounded-full">{q}</span>
-            ))}
-          </div>
+          <div className="flex flex-wrap gap-1">{data.relatedQueries.map((q: string, i: number) => <span key={i} className="bg-white/6 text-[10px] text-gray-400 px-2 py-0.5 rounded-full">{q}</span>)}</div>
         </div>
       )}
     </div>
   );
 
   if (panel === 'roadmap') return (
-    <div className="bg-white/4 border border-white/8 rounded-lg p-3">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}
-        components={{
-          p: ({ children }) => <p className="text-[11px] text-gray-300 mb-2">{children}</p>,
-          strong: ({ children }) => <strong className="text-orange-300">{children}</strong>,
-          li: ({ children }) => <li className="text-[11px] text-gray-300 mb-1">• {children}</li>,
-          h1: ({ children }) => <h1 className="text-xs font-bold text-white mb-2">{children}</h1>,
-          h2: ({ children }) => <h2 className="text-xs font-bold text-orange-300 mb-1 mt-3">{children}</h2>,
-          h3: ({ children }) => <h3 className="text-[11px] font-semibold text-white mb-1 mt-2">{children}</h3>,
-        }}>
-        {data.roadmap || data}
-      </ReactMarkdown>
-    </div>
+    <div className="bg-white/3 border border-white/8 rounded-xl p-3 text-[11px] text-gray-300 whitespace-pre-wrap leading-relaxed">{data.roadmap || data}</div>
   );
 
   return null;
 }
 
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
+function Card({ title, items, color }: { title: string; items: string[]; color: string }) {
+  const colors: Record<string, string> = { green: 'text-green-400 bg-green-500/8 border-green-500/15', yellow: 'text-yellow-400 bg-yellow-500/8 border-yellow-500/15' };
   return (
-    <button
-      onClick={() => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
-      className="mt-2 text-[10px] text-gray-600 hover:text-gray-300 transition-colors flex items-center gap-1"
-    >
-      {copied ? '✓ Copied' : '⎘ Copy'}
-    </button>
-  );
-}
-
-function Section({ title, items, color }: { title: string; items: string[]; color: string }) {
-  const colorMap: Record<string, string> = {
-    green: 'text-green-400 bg-green-500/8 border-green-500/15',
-    yellow: 'text-yellow-400 bg-yellow-500/8 border-yellow-500/15',
-    red: 'text-red-400 bg-red-500/8 border-red-500/15',
-  };
-  return (
-    <div className={`border rounded-lg p-3 ${colorMap[color] || colorMap.green}`}>
-      <p className={`text-[11px] font-semibold mb-2 ${colorMap[color]?.split(' ')[0]}`}>{title}</p>
-      {items?.map((item: string, i: number) => <p key={i} className="text-[11px] text-gray-300 mb-1">• {item}</p>)}
+    <div className={`border rounded-xl p-3 ${colors[color]}`}>
+      <p className={`text-[11px] font-semibold mb-2 ${colors[color].split(' ')[0]}`}>{title}</p>
+      {items?.map((item: string, i: number) => <p key={i} className="text-[11px] text-gray-300 mb-0.5">• {item}</p>)}
     </div>
   );
 }

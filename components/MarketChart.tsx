@@ -18,14 +18,14 @@ export default function MarketChart({ trendsData, researchData }: Props) {
 
   const competitorData = researchData?.competitors?.map((c, i) => ({
     name: c.name.slice(0, 12),
-    strength: Math.max(20, 90 - i * 15), // estimated relative strength
+    strength: Math.max(20, 90 - i * 15),
   })) || [];
 
   return (
     <div className="space-y-4">
       {trendsData && (
         <div className="bg-white/4 border border-white/8 rounded-lg p-3">
-          <p className="text-[11px] font-semibold text-white mb-3">📈 India Market Interest</p>
+          <p className="text-[11px] font-semibold text-white mb-3">📈 Market Interest</p>
           <ResponsiveContainer width="100%" height={120}>
             <BarChart data={interestData} barSize={40}>
               <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
