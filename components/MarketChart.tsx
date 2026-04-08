@@ -32,7 +32,7 @@ export default function MarketChart({ trendsData, researchData }: Props) {
               <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
               <Tooltip
                 contentStyle={{ background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 11 }}
-                formatter={(v: number) => [`${v}/100`, 'Interest']}
+                formatter={(v) => [`${v}/100`, 'Interest']}
               />
               <Bar dataKey="value" radius={[4, 4, 0, 0]}>
                 {interestData.map((_, i) => (
@@ -57,7 +57,7 @@ export default function MarketChart({ trendsData, researchData }: Props) {
               <YAxis type="category" dataKey="name" tick={{ fontSize: 9, fill: '#9ca3af' }} axisLine={false} tickLine={false} width={70} />
               <Tooltip
                 contentStyle={{ background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 11 }}
-                formatter={(v: number) => [`${v}/100`, 'Est. Strength']}
+                formatter={(v) => [`${v}/100`, 'Est. Strength']}
               />
               <Bar dataKey="strength" radius={[0, 4, 4, 0]}>
                 {competitorData.map((_, i) => (
